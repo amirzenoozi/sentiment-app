@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   api:
-    image: ghcr.io/amirzenoozi/sentiment-app:latest
+    image: ghcr.io/amirzenoozi/sentiment-app:${IMAGE_TAG:-latest}
     container_name: dutch_sentiment_api
     ports:
       - "8022:8000"
