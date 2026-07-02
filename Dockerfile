@@ -19,7 +19,7 @@ WORKDIR /app
 
 COPY pyproject.toml poetry.lock* ./
 
-RUN poetry install --no-root --without dev && rm -rf ~/.cache/pypoetry ~/.cache/pip
+RUN poetry install --no-root && rm -rf ~/.cache/pypoetry ~/.cache/pip
 
 COPY . .
 
