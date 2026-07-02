@@ -52,6 +52,7 @@ docker-compose.override.yml
 # MLflow and ML artifacts
 mlruns/
 best_model/
+best_model_*
 results/
 logs/
 
