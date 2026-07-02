@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  api:
+    image: ghcr.io/amirzenoozi/sentiment-app:latest
+    container_name: dutch_sentiment_api
+    ports:
+      - "8000:8000"
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow_server:5000
+      - TRANSLATION_API_URL=http://translation_service:5000/translate
+      - SUPPORTED_TRANSLATION_LANGS=en,it,de
+    volumes:
+      - ./model:/app/best_model
+    depends_on:
+      - mlflow_server
+      - translation_service
+    networks:
+      - sentiment_network
+    restart: always
+
+  translation_service:
+    image: libretranslate/libretranslate:latest
+    container_name: local_translation_service
+    ports:
+      - "5001:5000"
+    environment:
+      - LT_LOAD_ONLY=en,nl,de,it
+    networks:
+      - sentiment_network
+    restart: always
+
+  mlflow_server:
+    image: python:3.10-slim
+    container_name: mlflow_monitoring_server
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./mlruns_server:/app/mlruns
+    working_dir: /app
+    command: >
+      sh -c "pip install mlflow && mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:///mlruns/mlflow.db --default-artifact-root /app/mlruns"
+    networks:
+      - sentiment_network
+    restart: always
+
+networks:
+  sentiment_network:
+    driver: bridge
