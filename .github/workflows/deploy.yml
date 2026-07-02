@@ -63,4 +63,4 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository }}/sentiment-api:latest
+          tags: ghcr.io/${{ github.repository }}:latest
