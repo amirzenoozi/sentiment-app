@@ -34,6 +34,8 @@ class DataProcessor:
         X = self.df[text_column].tolist()
         y = self.df["encoded_label"].tolist()
 
-        # Split into training (80%) and validation (20%) sets with a fixed seed
-        X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=test_size, random_state=42)
+        # Split into training (80%) and validation (20%) sets with a fixed seed.
+        # stratify=y keeps each class's proportion identical across train/val,
+        # which stabilizes both training and the reliability of eval metrics.
+        X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=test_size, random_state=42, stratify=y)
         return X_train, X_val, y_train, y_val
