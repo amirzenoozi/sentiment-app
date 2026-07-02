@@ -1,0 +1,7 @@
+best_model/
+.venv/
+.pytest_cache/
+.git/
+__pycache__/
+*.joblib
+*.safetensors
