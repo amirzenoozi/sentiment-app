@@ -42,7 +42,7 @@ jobs:
 
       - name: Run Test Suite
         run: |
-          poetry run python -m unittest discover -s tests
+          poetry run python -m unittest discover -s test
 
       - name: Log in to GitHub Container Registry (GHCR)
         if: success()
