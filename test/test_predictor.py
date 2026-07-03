@@ -65,10 +65,21 @@ class TestSentimentPredictorMocked(unittest.TestCase):
         mock_response.json.return_value = {"translatedText": "Dit is een geweldige film"}
         mock_post.return_value = mock_response
 
-        translated_text = self.predictor._translate_to_dutch("This is a great movie", "en")
+        translated_text, was_translated = self.predictor._translate_to_dutch("This is a great movie", "en")
 
         self.assertEqual(translated_text, "Dit is een geweldige film")
+        self.assertTrue(was_translated)
         mock_post.assert_called_once()
+
+    @patch('src.predictor.requests.post')
+    def test_failed_translation_returns_original(self, mock_post):
+        """A failed translation call returns the original text and reports translated=False."""
+        mock_post.side_effect = Exception("connection refused")
+
+        text, was_translated = self.predictor._translate_to_dutch("This is a great movie", "en")
+
+        self.assertEqual(text, "This is a great movie")
+        self.assertFalse(was_translated)
 
     def test_empty_string_prediction_default(self):
         """Guarantees that an empty or whitespace-only input safely short-circuits to an 'Average' sentiment ranking."""
@@ -79,18 +90,35 @@ class TestSentimentPredictorMocked(unittest.TestCase):
         self.assertEqual(result_spaces, "Average")
 
     def test_predict_fallback_mechanism_mapping(self):
-        """Validates that the fallback engine cleanly maps integer outputs back to descriptive string semantics."""
+        """Validates that the fallback engine maps integer outputs to labels and returns a score."""
         # Force the mocked fallback pipeline to output index 2 (Positive)
         self.mock_fallback_instance.predict.return_value = [2]
+        self.mock_fallback_instance.predict_proba.return_value = [[0.1, 0.2, 0.7]]
 
-        result = self.predictor._predict_fallback("Some text")
-        self.assertEqual(result, "Positive")
+        label, score = self.predictor._predict_fallback("Some text")
+        self.assertEqual(label, "Positive")
+        self.assertAlmostEqual(score, 0.7)
 
         # Force the mocked fallback pipeline to output index 0 (Negative)
         self.mock_fallback_instance.predict.return_value = [0]
+        self.mock_fallback_instance.predict_proba.return_value = [[0.8, 0.1, 0.1]]
 
-        result = self.predictor._predict_fallback("Some text")
-        self.assertEqual(result, "Negative")
+        label, score = self.predictor._predict_fallback("Some text")
+        self.assertEqual(label, "Negative")
+        self.assertAlmostEqual(score, 0.8)
+
+    def test_predict_with_details_empty_input(self):
+        """Empty input returns the Average default with a null score and no translation."""
+        details = self.predictor.predict_with_details("   ")
+
+        self.assertEqual(details["label"], "Average")
+        self.assertIsNone(details["score"])
+        self.assertFalse(details["is_translated"])
+        self.assertIsNone(details["detected_language"])
+
+    def test_predict_returns_label_string(self):
+        """predict() keeps its string contract even though the engine now tracks metadata."""
+        self.assertIsInstance(self.predictor.predict("   "), str)
 
 
 if __name__ == '__main__':
