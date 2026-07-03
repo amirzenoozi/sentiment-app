@@ -100,7 +100,13 @@ class SentimentPredictor:
         return candidates[0]
 
 
-    def _translate_to_dutch(self, text: str, source_lang: str) -> str:
+    def _translate_to_dutch(self, text: str, source_lang: str):
+        """Translate text to Dutch via the microservice.
+
+        Returns a (text, translated) tuple where `translated` is True only when the
+        microservice actually returned a translation; on any failure it returns the
+        original text with translated=False.
+        """
         try:
             payload = {
                 "q": text,
@@ -112,10 +118,10 @@ class SentimentPredictor:
             if response.status_code == 200:
                 translated_text = response.json().get("translatedText", text)
                 logger.info(f"Microservice Translation successful: {source_lang} -> nl")
-                return translated_text
+                return translated_text, True
         except Exception as e:
             logger.warning(f"Translation microservice connection error: {e}")
-        return text
+        return text, False
 
 
     def _validate_language(self, detected_lang: str):
@@ -141,8 +147,19 @@ class SentimentPredictor:
         return self.labels[prediction_id]
 
     def predict(self, text: str) -> str:
+        """Return only the predicted sentiment label."""
+        return self.predict_with_details(text)["label"]
+
+    def predict_with_details(self, text: str) -> dict:
+        """Classify text and report translation metadata.
+
+        Returns a dict with:
+          - label: the predicted sentiment
+          - detected_language: the language langdetect saw (None for empty input)
+          - is_translated: True if the input was translated to Dutch before inference
+        """
         if not text.strip():
-            return "Average"
+            return {"label": "Average", "detected_language": None, "is_translated": False}
 
         # Step 1: Detect incoming text language wrapper at the edge
         try:
@@ -155,19 +172,22 @@ class SentimentPredictor:
         self._validate_language(detected_lang)
 
         # Step 3: Conditional dynamic routing through translation if text is foreign
+        is_translated = False
         if detected_lang != "nl":
-            text = self._translate_to_dutch(text, detected_lang)
+            text, is_translated = self._translate_to_dutch(text, detected_lang)
 
         # Step 4: Core inference execution block with automated recovery triggers
         if not self.transformer_ready:
-            return self._predict_fallback(text)
+            label = self._predict_fallback(text)
+        else:
+            try:
+                inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=512, padding=True).to(self.device)
+                with torch.no_grad():
+                    outputs = self.model(**inputs)
+                    predicted_class_id = torch.argmax(outputs.logits, dim=1).item()
+                label = self.labels[predicted_class_id]
+            except Exception as runtime_error:
+                logger.warning(f"Primary Transformer runtime failure: {runtime_error}. Switching to fallback model.")
+                label = self._predict_fallback(text)
 
-        try:
-            inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=512, padding=True).to(self.device)
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-                predicted_class_id = torch.argmax(outputs.logits, dim=1).item()
-            return self.labels[predicted_class_id]
-        except Exception as runtime_error:
-            logger.warning(f"Primary Transformer runtime failure: {runtime_error}. Switching to fallback model.")
-            return self._predict_fallback(text)
+        return {"label": label, "detected_language": detected_lang, "is_translated": is_translated}

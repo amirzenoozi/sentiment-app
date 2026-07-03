@@ -26,15 +26,21 @@ class ReviewInput(BaseModel):
 
 
 def _run_prediction(engine, review: str):
-    """Run one prediction and return a (label, latency_seconds) response body.
+    """Run one prediction and return the response body.
 
     Shared by the primary and quantized routes so both apply identical language
-    validation and error semantics.
+    validation and error semantics. `is_translated` is True when the input was
+    translated to Dutch before inference.
     """
     start_time = time.time()
-    label = engine.predict(review)
+    details = engine.predict_with_details(review)
     latency = time.time() - start_time
-    return {"label": label, "latency_seconds": round(latency, 4)}
+    return {
+        "label": details["label"],
+        "is_translated": details["is_translated"],
+        "detected_language": details["detected_language"],
+        "latency_seconds": round(latency, 4),
+    }
 
 
 @app.get("/health", status_code=status.HTTP_200_OK, tags=["ops"])
