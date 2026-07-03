@@ -1,289 +1,154 @@
-# Dutch Movie Review Sentiment Classifier (sentiment-app)
+# Dutch Movie Review Sentiment Classifier
 
-An enterprise-grade, modular, and production-ready machine learning pipeline and REST API designed to classify the sentiment of Dutch movie reviews into three distinct categories: **Positive**, **Average**, or **Negative**. 
+Classifies Dutch movie reviews as **Positive**, **Average**, or **Negative**.
 
-The architecture features a high-performance **Transformer (RobBERT)** as the primary engine, paired with an automated **lightweight machine learning fallback mechanism** to ensure 100% uptime and high availability under computational constraints or unexpected runtime failures.
+- **Primary model:** fine-tuned `pdelobelle/robbert-v2-dutch-base` (RobBERT).
+- **Fallback:** a TF-IDF + Logistic Regression baseline, used automatically if the transformer fails to load or errors at runtime.
+- **Quantized model:** an INT8 ONNX build of the primary model for faster, lighter CPU inference, served on its own endpoint for comparison.
+- **Language handling:** non-Dutch input is auto-detected; supported languages (`en`, `de`, `it`) are translated to Dutch via a LibreTranslate microservice, anything else is rejected with HTTP 400.
 
----
-
-## 🏗️ Architecture & Core Principles
-
-- **Primary Transformer Engine:** Fine-tuned `pdelobelle/robbert-v2-dutch-base` optimized for native Dutch language semantics.
-- **Automated Fallback Pipeline:** A highly efficient `TF-IDF + Logistic Regression` baseline that automatically triggers if the primary Transformer model encounters any hardware limitations, GPU Out-Of-Memory (OOM) situations, or runtime errors.
-- **Language Boundary Enforcement:** Automated language detection wrapper via `langdetect` ensuring that inputs violating the Dutch language constraint are filtered at the edge with immediate HTTP 400 Bad Request feedback.
-- **Experiment Tracking:** Comprehensive academic metric collection logging Loss, F1-Macro, Precision, and Recall dynamically to an **MLflow** dashboard.
-- **Package Management:** Native deterministic dependency locking using **Poetry** to prevent environment drift across development platforms (e.g., Apple Silicon) and production environments (Linux AMD64).
-- **CI/CD & Virtualization:** Continuous integration workflows via GitHub Actions publishing directly to GitHub Container Registry (GHCR) paired with a `docker-compose` topology.
+Data and model artifacts are versioned with **DVC** (stored on an SSH remote); the app is packaged with **Docker Compose** and images are published to GHCR via GitHub Actions.
 
 ---
 
-## 🛠️ Project Structure
+## Project Structure
 
 ```text
 sentiment-app/
-│
-├── .github/
-│   └── workflows/
-│       └── deploy.yml       # Automated GitHub Actions CI/CD pipeline
-│
-├── .dvc/
-│   └── config               # DVC remote definition (SSH); secrets live in config.local (git-ignored)
-│
-├── data/
-│   └── dutch_sentences.csv.dvc  # DVC pointer — real CSV is fetched via `dvc pull`
-│
 ├── src/
-│   ├── __init__.py          # Package initialization marker
-│   ├── data_processor.py    # Data ingest, filtering (NL language column), and parsing
-│   ├── model_trainer.py     # MLflow logging orchestration, RobBERT & Baseline training loops
-│   └── predictor.py         # Thread-safe hybrid inference engine with validation wrappers
-│
-├── tests/
-│   ├── __init__.py          # Test suite marker
-│   └── test_predictor.py    # Suite testing baseline predictability constraints
-│
-├── app.py                   # FastAPI application layer exposing the REST schema
-├── Dockerfile               # Production multi-stage Docker configuration
-├── docker-compose.yml       # Local production orchestration engine (API + MLflow)
-├── pyproject.toml           # Poetry manifest declaring dependency trees
-└── train_pipeline.py        # CLI entrypoint orchestrating dynamic model preparation
+│   ├── data_processor.py   # Data loading & filtering
+│   ├── model_trainer.py    # Training + MLflow logging
+│   └── predictor.py        # Inference engine (torch + ONNX backends, fallback, language routing)
+├── app.py                  # FastAPI app
+├── train_pipeline.py       # Training CLI
+├── quantize_cli.py         # ONNX INT8 quantization CLI
+├── Dockerfile
+├── docker-compose.yml
+├── pyproject.toml
+├── data/dutch_sentences.csv.dvc   # DVC pointer to the dataset
+├── best_model.dvc                 # DVC pointer to the trained model
+└── quantized_model.dvc            # DVC pointer to the quantized model
 ```
 
-## 🚀 Local Development Setup
-1. Prerequisite Environment (Apple Silicon / Linux)
-Ensure that you are running a stable Python runtime. It is highly recommended to use pyenv to lock the environment to Python 3.12:
+---
+
+## Setup
+
+Requires **Python 3.12** and **Poetry**.
 
 ```bash
-# Install and lock Python 3.12 locally inside the project directory
-pyenv install 3.12.8
 pyenv local 3.12.8
-
-# Verify your terminal session points to Python 3.12
-python --version
-```
-
-2. Dependency Management via Poetry
-Configure Poetry to prioritize your active isolated Python runtime and install the dependency tree:
-
-```bash
-# Tell Poetry to always respect the local pyenv environment wrapper
-poetry config virtualenvs.prefer-active-python true
-
-# Force Poetry to build the virtual environment using the explicit Python 3.12 path
 poetry env use python3.12
-
-# Install all locked production and evaluation dependencies
 poetry install
 ```
 
-## 📦 Dataset Versioning (DVC)
-The training corpus (`data/dutch_sentences.csv`, ~7 MB) is **not** committed to Git. It is versioned with **DVC (Data Version Control)**: Git stores only a tiny pointer file (`data/dutch_sentences.csv.dvc`, holding the dataset's md5 hash and size), while the actual bytes live on a **self-hosted SSH remote**. This keeps the repository lightweight and fully reproducible — because the pointer is committed alongside the code, every commit maps to an exact dataset revision.
+---
 
-- **Remote:** `ssh://root@65.21.60.8//root/workspace365` (declared in `.dvc/config`; blobs stored under `workspace365/files/`)
-- **Git pointer:** `data/dutch_sentences.csv.dvc` (md5 + size, not the data itself)
-- **Transport:** SSH — provided by the `dvc-ssh` extra (`poetry run pip install "dvc[ssh]"`)
+## DVC (Data & Models)
 
-### 1. One-Time Authentication
-The SSH credential is deliberately kept out of Git (it lives in the git-ignored `.dvc/config.local`). After cloning, point DVC at your own private key — your matching public key must already be authorized on the remote host:
+The dataset (`data/dutch_sentences.csv`), the trained model (`best_model/`), and the quantized model (`quantized_model/`) are **not** committed to Git. DVC stores small pointer files in Git and keeps the actual bytes on an SSH remote (defined in `.dvc/config`; credentials live in the git-ignored `.dvc/config.local`).
 
 ```bash
-# Register your private key locally (written to .dvc/config.local, never committed)
+# One-time: set your SSH credential (key or password) — written to config.local
 poetry run dvc remote modify --local myremote keyfile ~/.ssh/id_rsa
-```
+# ...or password auth:
+poetry run dvc remote modify --local myremote password 'YOUR_PASSWORD'
 
-### 2. Pull the Dataset (materialize the real CSV)
-Before training, hydrate the dataset from the remote into your working tree:
-
-```bash
-# Reads the .dvc pointer, downloads the matching blob, writes the full CSV to disk
+# Download the dataset + models
 poetry run dvc pull
-```
 
-Inspect sync state at any time:
-
-```bash
-poetry run dvc status          # local: workspace vs. the committed pointer
-poetry run dvc status --cloud  # remote: is the blob present on the server?
-```
-
-### 3. Feed the Dataset into Training
-Once pulled, `data/dutch_sentences.csv` is an ordinary file on disk — hand its path to the training CLI exactly as documented below (the pipeline ingests it via `DataProcessor` in `src/data_processor.py`):
-
-```bash
-poetry run python train_pipeline.py --data_path data/dutch_sentences.csv --epochs 5 --batch_size 16
-```
-
-> DVC and training are decoupled: `dvc pull` is only about *fetching* the file; `--data_path` is only about *using* it. Pointing `--data_path` at a different CSV leaves the DVC-tracked dataset untouched.
-
-### 4. Publish a New Dataset Version
-If you modify the dataset, re-track it and push the new bytes to the server:
-
-```bash
-# a. Recompute the hash and refresh the pointer after editing the CSV
-poetry run dvc add data/dutch_sentences.csv
-
-# b. Version the updated pointer together with your code
-git add data/dutch_sentences.csv.dvc
-git commit -m "data: update Dutch sentiment dataset"
-
-# c. Upload the new blob to the SSH remote
+# After changing a tracked artifact, publish the new version
+poetry run dvc add best_model            # or data/dutch_sentences.csv, quantized_model
+git add best_model.dvc && git commit -m "update model"
 poetry run dvc push
 ```
 
-Anyone who checks out that commit and runs `dvc pull` retrieves the exact dataset that produced those results.
+Each Git commit maps to an exact dataset/model revision, so `git checkout <commit> && dvc pull` reproduces any version.
 
 ---
 
-## 🏋️ CLI Training Pipeline
-The training framework is wrapped in a robust Command Line Interface (CLI) allowing you to override hyper-parameters dynamically without mutating the code surface.
-Execution Commands:
+## Training
 
 ```bash
-# View all available parameters and configurations via the help manual
-poetry run python train_pipeline.py --help
-
-# Run the training pipeline using a custom file path (e.g., data/my_reviews.csv)
-poetry run python train_pipeline.py --data_path data/dutch_sentences.csv
-
-# Run an intensive training cycle overriding default Epochs and Batch Sizes
 poetry run python train_pipeline.py --data_path data/dutch_sentences.csv --epochs 5 --batch_size 16
+poetry run python train_pipeline.py --help   # all options
 ```
 
-## 🧠 Model Versioning (DVC)
-Training writes the fine-tuned artifacts to `best_model/` — the RobBERT `model.safetensors`, tokenizer, config, and the `fallback_model.joblib` baseline (~449 MB total). Like the dataset, this directory is **git-ignored** and versioned with **DVC** on the same self-hosted SSH remote: Git commits only a small `best_model.dvc` pointer (the directory's md5), while the binary weights live on the server. Every retrain becomes a new, hash-verified model version tied to its commit — replacing ad-hoc `best_model_v1/` snapshot folders.
-
-> Authentication and the remote definition are **shared** with the dataset workflow above — no extra setup is required beyond `dvc pull` / `dvc push`.
-
-### 1. Version a Freshly Trained Model
-After a training run produces a new `best_model/`, snapshot it and upload the weights:
-
-```bash
-# a. Hash the directory and refresh the pointer
-poetry run dvc add best_model
-
-# b. Commit the pointer alongside the code/params that produced it
-git add best_model.dvc .gitignore
-git commit -m "model: describe this checkpoint (e.g. class-weighted v2)"
-
-# c. Push the binary weights to the SSH remote
-poetry run dvc push
-```
-
-### 2. Fetch a Model (any machine)
-Reproduce the exact weights recorded for the current commit:
-
-```bash
-poetry run dvc pull            # recreates best_model/ from the remote
-# ...or fetch just the model without a full checkout:
-# dvc get <this-repo-url> best_model -o best_model
-```
-
-### 3. Deploy a Model to the Server
-The API container serves from the `./model` volume (`docker-compose.yml`). Promote a DVC-tracked checkpoint into the serving directory on the host:
-
-```bash
-# On the server, inside a checkout of this repository
-poetry run dvc pull                                        # materialize best_model/
-rsync -a --delete best_model/ /root/workspace365/model/    # refresh served weights
-docker compose restart api                                 # reload the API with the new model
-```
-
-Because the served weights trace back to a specific `best_model.dvc` commit, every production model is fully reproducible — and rolling back is a `git checkout <commit>` + `dvc pull` away.
+Training writes the model to `best_model/` and logs metrics (loss, F1-macro, precision, recall) to MLflow.
 
 ---
 
-## Experiment Monitoring (MLflow Server)
-Launch the telemetry tracking interface locally to monitor loss curves, precision, and F1-macro matrices:
+## Quantization
+
+Convert a trained model into an INT8 ONNX build (~4× smaller, faster CPU inference):
 
 ```bash
-# Boot the MLflow telemetry user interface locally
-poetry run mlflow ui
+# arm64 (Mac/ARM) is the default; use avx2/avx512 for x86 servers
+poetry run python quantize_cli.py ./best_model ./quantized_model --arch avx2
 ```
 
-Once active, navigate your browser to: `http://localhost:5000`
+Output goes to `quantized_model/` (`model_quantized.onnx` + tokenizer). The API serves it via `/classify/quantized`.
 
+---
 
-## 🧪 Evaluation & Unit Testing
-Validate the inference layer and guarantee that predictable label sets (Positive, Average, Negative) are properly bound by executing the test runner:
-
-```bash
-# Run the complete test suite against your local predictor implementations
-poetry run python -m unittest tests/test_predictor.py
-```
-
-## 🌐 Running the Web API Locally
-Boot the asynchronous FastAPI application layer locally on your workstation:
+## Running the API
 
 ```bash
-# Run the local development server with live reload enabled
 poetry run uvicorn app:app --reload --port 8000
 ```
 
-Access the interactive OpenAPI Swagger documentation by navigating to: `http://localhost:8000/docs`
+Swagger UI: `http://localhost:8000/docs`
 
-### API Validation Examples
-1. Valid Evaluation Request (Dutch)
+### Endpoints
+
+| Method | Path                  | Description                                            |
+|--------|-----------------------|--------------------------------------------------------|
+| POST   | `/classify`           | Classify with the primary (PyTorch) model              |
+| POST   | `/classify/quantized` | Classify with the INT8 ONNX model (503 if not loaded)  |
+| POST   | `/compare`            | Run both models, return labels, latencies, and speedup |
+| GET    | `/health`             | Liveness probe                                         |
+| GET    | `/ready`              | Readiness probe (reports which engines are loaded)     |
+
+**Example**
+
 ```bash
-curl -X 'POST' \
-  'http://localhost:8000/classify' \
-  -H 'accept: application/json' \
+curl -X POST http://localhost:8000/classify \
   -H 'Content-Type: application/json' \
-  -d '{
-  "review": "Dit is een absolute topfilm! Geweldig acteerwerk."
-}'
+  -d '{"review": "Dit is een absolute topfilm! Geweldig acteerwerk."}'
+# -> {"label": "Positive", "latency_seconds": 0.045}
 ```
 
-Expected Response (HTTP 200 OK):
-```json
-{
-  "label": "Positive",
-  "latency_seconds": 0.0452
-}
+Unsupported non-Dutch input returns HTTP 400.
+
+---
+
+## Deployment (Docker Compose)
+
+The stack runs three services: `api` (port 8022), `translation_service` (LibreTranslate), and `mlflow_server` (port 5000). Models are mounted from host directories:
+
+```yaml
+volumes:
+  - ./model:/app/best_model
+  - ./quantized_model:/app/quantized_model
 ```
-
-2. Invalid Evaluation Request (Non-Dutch Violation)
-```bash
-curl -X 'POST' \
-  'http://localhost:8000/classify' \
-  -H 'accept: application/json' \
-  -H 'Content-Type: application/json' \
-  -d '{
-  "review": "This movie was incredibly boring and a waste of time."
-}'
-```
-
-Expected Response (HTTP 400 Bad Request):
-```json
-{
-  "detail": "Input language detected as 'en', but only Dutch ('nl') is supported."
-}
-```
-
-## 🐳 Production Server Deployment (Docker Compose)
-The system utilizes an enterprise-grade dual-container architecture for remote deployment. The app image is automatically built and stored inside the GitHub Container Registry (GHCR) via GitHub Actions.
-Deployment Lifecycle on the Linux Server:
-
-Step 1: Remote Container Registry Authentication
-Generate a GitHub Personal Access Token (classic) with read:packages scope, then execute authentication on the Linux production host terminal:
 
 ```bash
+# On the server (image is built & pushed to GHCR by GitHub Actions)
 docker login ghcr.io -u YOUR_GITHUB_USERNAME
-```
-
-Step 2: Provision Infrastructure Configurations
-Create the docker-compose.yml file on your server host. Pull down the newly updated image architectures from the upstream container clouds and spin up the production infrastructure:
-
-```bash
-# Force a pull sequence downloading the latest production images from GHCR
 docker compose pull
-
-# Spin up the dual-container topology in detached (background) mode
 docker compose up -d
-
-# Check live orchestration health logs
 docker compose logs -f
 ```
 
-Server Endpoint Map:
-- FastAPI Core Gateway: `http://YOUR_SERVER_IP:8000/docs`
-- Centralized MLflow Monitor Console: `http://YOUR_SERVER_IP:5000`
+- API: `http://YOUR_SERVER_IP:8022/docs`
+- MLflow: `http://YOUR_SERVER_IP:5000`
+
+To update a served model, refresh the mounted directory (e.g. `dvc pull` then copy into `./model` / `./quantized_model`) and restart the `api` service.
+
+---
+
+## Testing
+
+```bash
+poetry run python -m unittest tests/test_predictor.py
+```
