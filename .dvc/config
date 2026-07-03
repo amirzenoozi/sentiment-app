@@ -1,5 +1,5 @@
 [core]
     remote = myremote
 ['remote "myremote"']
-    url = ssh://root@65.21.60.8//root/dvc-storage
+    url = ssh://root@65.21.60.8//root/workspace365
     user = root

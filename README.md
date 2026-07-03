@@ -26,6 +26,12 @@ sentiment-app/
 │   └── workflows/
 │       └── deploy.yml       # Automated GitHub Actions CI/CD pipeline
 │
+├── .dvc/
+│   └── config               # DVC remote definition (SSH); secrets live in config.local (git-ignored)
+│
+├── data/
+│   └── dutch_sentences.csv.dvc  # DVC pointer — real CSV is fetched via `dvc pull`
+│
 ├── src/
 │   ├── __init__.py          # Package initialization marker
 │   ├── data_processor.py    # Data ingest, filtering (NL language column), and parsing
@@ -69,6 +75,64 @@ poetry env use python3.12
 # Install all locked production and evaluation dependencies
 poetry install
 ```
+
+## 📦 Dataset Versioning (DVC)
+The training corpus (`data/dutch_sentences.csv`, ~7 MB) is **not** committed to Git. It is versioned with **DVC (Data Version Control)**: Git stores only a tiny pointer file (`data/dutch_sentences.csv.dvc`, holding the dataset's md5 hash and size), while the actual bytes live on a **self-hosted SSH remote**. This keeps the repository lightweight and fully reproducible — because the pointer is committed alongside the code, every commit maps to an exact dataset revision.
+
+- **Remote:** `ssh://root@65.21.60.8//root/dvc-storage` (declared in `.dvc/config`)
+- **Git pointer:** `data/dutch_sentences.csv.dvc` (md5 + size, not the data itself)
+- **Transport:** SSH — provided by the `dvc-ssh` extra (`poetry run pip install "dvc[ssh]"`)
+
+### 1. One-Time Authentication
+The SSH credential is deliberately kept out of Git (it lives in the git-ignored `.dvc/config.local`). After cloning, point DVC at your own private key — your matching public key must already be authorized on the remote host:
+
+```bash
+# Register your private key locally (written to .dvc/config.local, never committed)
+poetry run dvc remote modify --local myremote keyfile ~/.ssh/id_rsa
+```
+
+### 2. Pull the Dataset (materialize the real CSV)
+Before training, hydrate the dataset from the remote into your working tree:
+
+```bash
+# Reads the .dvc pointer, downloads the matching blob, writes the full CSV to disk
+poetry run dvc pull
+```
+
+Inspect sync state at any time:
+
+```bash
+poetry run dvc status          # local: workspace vs. the committed pointer
+poetry run dvc status --cloud  # remote: is the blob present on the server?
+```
+
+### 3. Feed the Dataset into Training
+Once pulled, `data/dutch_sentences.csv` is an ordinary file on disk — hand its path to the training CLI exactly as documented below (the pipeline ingests it via `DataProcessor` in `src/data_processor.py`):
+
+```bash
+poetry run python train_pipeline.py --data_path data/dutch_sentences.csv --epochs 5 --batch_size 16
+```
+
+> DVC and training are decoupled: `dvc pull` is only about *fetching* the file; `--data_path` is only about *using* it. Pointing `--data_path` at a different CSV leaves the DVC-tracked dataset untouched.
+
+### 4. Publish a New Dataset Version
+If you modify the dataset, re-track it and push the new bytes to the server:
+
+```bash
+# a. Recompute the hash and refresh the pointer after editing the CSV
+poetry run dvc add data/dutch_sentences.csv
+
+# b. Version the updated pointer together with your code
+git add data/dutch_sentences.csv.dvc
+git commit -m "data: update Dutch sentiment dataset"
+
+# c. Upload the new blob to the SSH remote
+poetry run dvc push
+```
+
+Anyone who checks out that commit and runs `dvc pull` retrieves the exact dataset that produced those results.
+
+---
 
 ## 🏋️ CLI Training Pipeline
 The training framework is wrapped in a robust Command Line Interface (CLI) allowing you to override hyper-parameters dynamically without mutating the code surface.
