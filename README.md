@@ -149,6 +149,49 @@ poetry run python train_pipeline.py --data_path data/dutch_sentences.csv
 poetry run python train_pipeline.py --data_path data/dutch_sentences.csv --epochs 5 --batch_size 16
 ```
 
+## 🧠 Model Versioning (DVC)
+Training writes the fine-tuned artifacts to `best_model/` — the RobBERT `model.safetensors`, tokenizer, config, and the `fallback_model.joblib` baseline (~449 MB total). Like the dataset, this directory is **git-ignored** and versioned with **DVC** on the same self-hosted SSH remote: Git commits only a small `best_model.dvc` pointer (the directory's md5), while the binary weights live on the server. Every retrain becomes a new, hash-verified model version tied to its commit — replacing ad-hoc `best_model_v1/` snapshot folders.
+
+> Authentication and the remote definition are **shared** with the dataset workflow above — no extra setup is required beyond `dvc pull` / `dvc push`.
+
+### 1. Version a Freshly Trained Model
+After a training run produces a new `best_model/`, snapshot it and upload the weights:
+
+```bash
+# a. Hash the directory and refresh the pointer
+poetry run dvc add best_model
+
+# b. Commit the pointer alongside the code/params that produced it
+git add best_model.dvc .gitignore
+git commit -m "model: describe this checkpoint (e.g. class-weighted v2)"
+
+# c. Push the binary weights to the SSH remote
+poetry run dvc push
+```
+
+### 2. Fetch a Model (any machine)
+Reproduce the exact weights recorded for the current commit:
+
+```bash
+poetry run dvc pull            # recreates best_model/ from the remote
+# ...or fetch just the model without a full checkout:
+# dvc get <this-repo-url> best_model -o best_model
+```
+
+### 3. Deploy a Model to the Server
+The API container serves from the `./model` volume (`docker-compose.yml`). Promote a DVC-tracked checkpoint into the serving directory on the host:
+
+```bash
+# On the server, inside a checkout of this repository
+poetry run dvc pull                                        # materialize best_model/
+rsync -a --delete best_model/ /root/workspace365/model/    # refresh served weights
+docker compose restart api                                 # reload the API with the new model
+```
+
+Because the served weights trace back to a specific `best_model.dvc` commit, every production model is fully reproducible — and rolling back is a `git checkout <commit>` + `dvc pull` away.
+
+---
+
 ## Experiment Monitoring (MLflow Server)
 Launch the telemetry tracking interface locally to monitor loss curves, precision, and F1-macro matrices:
 
