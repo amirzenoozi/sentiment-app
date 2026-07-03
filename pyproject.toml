@@ -14,7 +14,7 @@ torch = [
     # Linux (Docker/CI): pull the CPU-only build from PyTorch's index to keep the image small.
     { version = "^2.2.0", source = "pytorch-cpu", markers = "sys_platform == 'linux'" },
     # macOS/Windows (local dev): that index has no wheels; use the normal PyPI wheel (CPU-only on Mac).
-    { version = "^2.2.0", source = "pypi", markers = "sys_platform != 'linux'" },
+    { version = "^2.2.0", markers = "sys_platform != 'linux'" },
 ]
 pandas = "^2.2.2"
 scikit-learn = "^1.5.0"
@@ -23,6 +23,9 @@ pydantic = "^2.7.2"
 joblib = "^1.4.2"
 langdetect = "^1.0.9"
 accelerate = "^1.14.0"
+# ONNX Runtime stack: exports/loads the INT8-quantized model (quantize_cli.py) and
+# serves it via the /classify/quantized endpoint.
+optimum = { version = "^1.23", extras = ["onnxruntime"] }
 
 [[tool.poetry.source]]
 name = "pytorch-cpu"
