@@ -229,13 +229,26 @@ class ModelTrainer:
 
         mlflow.set_experiment("Dutch_Sentiment_Analysis")
         with mlflow.start_run():
-            trainer = WeightedTrainer(
+            # --- Option A: weighted cross-entropy only (previous setup) ---
+            # trainer = WeightedTrainer(
+            #     model=self.model,
+            #     args=training_args,
+            #     train_dataset=train_dataset,
+            #     eval_dataset=val_dataset,
+            #     compute_metrics=compute_metrics,
+            #     class_weights=class_weights
+            # )
+
+            # --- Option B: weighted CE + supervised contrastive loss (active) ---
+            trainer = ContrastiveTrainer(
                 model=self.model,
                 args=training_args,
                 train_dataset=train_dataset,
                 eval_dataset=val_dataset,
                 compute_metrics=compute_metrics,
-                class_weights=class_weights
+                class_weights=class_weights,
+                contrastive_weight=0.1,
+                temperature=0.07
             )
 
             trainer.train()
@@ -244,6 +257,9 @@ class ModelTrainer:
             mlflow.log_param("model_name", self.model_name)
             mlflow.log_param("batch_size", batch_size)
             mlflow.log_param("class_weights", weights.tolist())
+            if isinstance(trainer, ContrastiveTrainer):
+                mlflow.log_param("contrastive_weight", trainer.contrastive_weight)
+                mlflow.log_param("contrastive_temperature", trainer.supcon.temperature)
 
             self.model.save_pretrained("./best_model")
             self.tokenizer.save_pretrained("./best_model")
