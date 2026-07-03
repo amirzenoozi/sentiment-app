@@ -63,8 +63,7 @@ def predict_transformer(X_val, model_path: str, batch_size: int = 16):
     with torch.no_grad():
         for i in range(0, len(X_val), batch_size):
             batch = X_val[i:i + batch_size]
-            enc = tokenizer(batch, return_tensors="pt", truncation=True,
-                            padding=True, max_length=256)
+            enc = tokenizer(batch, return_tensors="pt", truncation=True, padding=True, max_length=256)
             logits = model(**enc).logits
             preds.extend(torch.argmax(logits, dim=1).tolist())
     return preds
@@ -96,8 +95,7 @@ def main():
         y_pred = predict_transformer(X_val, args.model_path)
 
     print(f"=== {args.model.upper()} — classification report ===")
-    print(classification_report(y_val, y_pred, labels=[0, 1, 2],
-                                target_names=LABELS, digits=3, zero_division=0))
+    print(classification_report(y_val, y_pred, labels=[0, 1, 2], target_names=LABELS, digits=3, zero_division=0))
     print_confusion(confusion_matrix(y_val, y_pred, labels=[0, 1, 2]))
 
 

@@ -79,6 +79,96 @@ class WeightedTrainer(Trainer):
         return (loss, outputs) if return_outputs else loss
 
 
+class SupConLoss(torch.nn.Module):
+    """Supervised Contrastive Loss (Khosla et al., 2020).
+
+    Pulls embeddings that share a label together and pushes different-label
+    embeddings apart, shaping a cleaner feature space before classification.
+    Operates on a single view of L2-normalized feature vectors.
+
+    NOTE: Provided as a standalone, reusable component only — it is NOT wired
+    into the training pipeline, which still uses weighted cross-entropy (see
+    WeightedTrainer). To use it you would extract the encoder's pooled embedding
+    per example and combine this loss with the CE head loss.
+
+    Args:
+        temperature: scales the cosine-similarity logits; lower = sharper.
+    """
+
+    def __init__(self, temperature: float = 0.07):
+        super().__init__()
+        self.temperature = temperature
+
+    def forward(self, features: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            features: (batch_size, dim) embeddings (L2-normalized internally).
+            labels:   (batch_size,) integer class ids.
+        Returns:
+            Scalar contrastive loss.
+        """
+        device = features.device
+        features = torch.nn.functional.normalize(features, dim=1)
+
+        # Pairwise cosine similarities, temperature-scaled.
+        logits = torch.matmul(features, features.T) / self.temperature
+        # Numerical stability: subtract the per-row max (detached, no grad).
+        logits = logits - logits.max(dim=1, keepdim=True).values.detach()
+
+        labels = labels.view(-1, 1)
+        # Positives = same label; exclude each anchor comparing with itself.
+        self_mask = torch.eye(labels.size(0), device=device)
+        pos_mask = (labels == labels.T).float().to(device) - self_mask
+
+        # log-softmax over all pairs except self.
+        exp_logits = torch.exp(logits) * (1.0 - self_mask)
+        log_prob = logits - torch.log(exp_logits.sum(dim=1, keepdim=True) + 1e-12)
+
+        # Mean log-likelihood over the positive pairs of each anchor.
+        pos_count = torch.clamp(pos_mask.sum(dim=1), min=1.0)  # avoid /0
+        mean_log_prob_pos = (pos_mask * log_prob).sum(dim=1) / pos_count
+
+        return -mean_log_prob_pos.mean()
+
+
+class ContrastiveTrainer(Trainer):
+    """Trainer with a combined loss: weighted cross-entropy + SupCon.
+
+        total = CE(weighted) + contrastive_weight * SupCon(pooled_embedding, labels)
+
+    The SupCon term shapes the encoder's embedding space (same-label reviews
+    cluster, different-label push apart); the CE term keeps the classifier head
+    calibrated. `contrastive_weight` (lambda) trades off the two — 0.0 reduces to
+    plain WeightedTrainer.
+    """
+
+    def __init__(self, *args, class_weights=None, contrastive_weight: float = 0.1,
+                 temperature: float = 0.07, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.class_weights = class_weights
+        self.contrastive_weight = contrastive_weight
+        self.supcon = SupConLoss(temperature=temperature)
+
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+        labels = inputs.pop("labels")
+        # Ask the encoder for hidden states so we can read a pooled embedding.
+        outputs = model(**inputs, output_hidden_states=True)
+        logits = outputs.logits
+
+        weight = self.class_weights.to(logits.device) if self.class_weights is not None else None
+        ce = torch.nn.CrossEntropyLoss(weight=weight)(
+            logits.view(-1, model.config.num_labels), labels.view(-1)
+        )
+
+        # RoBERTa/RobBERT: use the <s> (first) token of the last hidden layer
+        # as the sequence embedding.
+        pooled = outputs.hidden_states[-1][:, 0, :]
+        con = self.supcon(pooled, labels)
+
+        loss = ce + self.contrastive_weight * con
+        return (loss, outputs) if return_outputs else loss
+
+
 class ModelTrainer:
     """
     Manages dynamic training routines fueled by parameters passed via CLI arguments.
