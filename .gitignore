@@ -63,3 +63,4 @@ logs/
 .env.local
 .env.*
 /quantized_model
+/best_model
