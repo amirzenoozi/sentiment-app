@@ -1,0 +1,5 @@
+[core]
+    remote = myremote
+['remote "myremote"']
+    url = ssh://root@65.21.60.8//root/dvc-storage
+    user = root
