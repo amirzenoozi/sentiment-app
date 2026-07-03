@@ -1,5 +1,5 @@
 [core]
     remote = myremote
 ['remote "myremote"']
-    url = ssh://workspace365@65.21.60.8//workspace365/interview
+    url = ssh://workspace365@65.21.60.8//home/workspace365/interview
     user = workspace365
