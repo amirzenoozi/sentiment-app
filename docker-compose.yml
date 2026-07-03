@@ -12,6 +12,7 @@ services:
       - SUPPORTED_TRANSLATION_LANGS=en,it,de
     volumes:
       - ./model:/app/best_model
+      - ./quantized_model:/app/quantized_model
     depends_on:
       - mlflow_server
       - translation_service
