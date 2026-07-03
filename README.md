@@ -79,7 +79,7 @@ poetry install
 ## 📦 Dataset Versioning (DVC)
 The training corpus (`data/dutch_sentences.csv`, ~7 MB) is **not** committed to Git. It is versioned with **DVC (Data Version Control)**: Git stores only a tiny pointer file (`data/dutch_sentences.csv.dvc`, holding the dataset's md5 hash and size), while the actual bytes live on a **self-hosted SSH remote**. This keeps the repository lightweight and fully reproducible — because the pointer is committed alongside the code, every commit maps to an exact dataset revision.
 
-- **Remote:** `ssh://root@65.21.60.8//root/dvc-storage` (declared in `.dvc/config`)
+- **Remote:** `ssh://root@65.21.60.8//root/workspace365` (declared in `.dvc/config`; blobs stored under `workspace365/files/`)
 - **Git pointer:** `data/dutch_sentences.csv.dvc` (md5 + size, not the data itself)
 - **Transport:** SSH — provided by the `dvc-ssh` extra (`poetry run pip install "dvc[ssh]"`)
 
