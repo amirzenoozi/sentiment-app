@@ -53,6 +53,9 @@ docker-compose.override.yml
 mlruns/
 best_model/
 best_model_*
+quantized_model/
+quantized_model_*
+tmp_onnx/
 results/
 logs/
 
