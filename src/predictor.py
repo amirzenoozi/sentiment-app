@@ -24,8 +24,12 @@ class SentimentPredictor:
     and incoming language validation checks.
     """
 
-    def __init__(self, model_path: str = "./best_model"):
+    def __init__(self, model_path: str = "./best_model", backend: str = "torch"):
         self.labels = {0: "Negative", 1: "Average", 2: "Positive"}
+
+        # Inference backend: "torch" for the native PyTorch checkpoint (best_model),
+        # or "onnx" for the INT8-quantized ONNX Runtime graph (quantized_model).
+        self.backend = backend.lower()
 
         # Get translation endpoint from environment variables (configured in docker-compose)
         self.translation_url = os.getenv("TRANSLATION_API_URL", "http://localhost:5001/translate")
@@ -35,33 +39,65 @@ class SentimentPredictor:
         self.supported_langs = [lang.strip().lower() for lang in env_langs.split(",") if lang.strip()]
         logger.info(f"Loaded allowed non-Dutch translation languages from ENV: {self.supported_langs}")
 
-        # Device selection supporting Apple Silicon (MPS), NVIDIA (CUDA), and CPU
-        if torch.backends.mps.is_available():
+        # Device selection: the ONNX Runtime graph is a CPU-only INT8 artifact, so it
+        # always runs on CPU. The native PyTorch model can leverage MPS/CUDA when present.
+        if self.backend == "onnx":
+            self.device = torch.device("cpu")
+        elif torch.backends.mps.is_available():
             self.device = torch.device("mps")
         elif torch.cuda.is_available():
             self.device = torch.device("cuda")
         else:
             self.device = torch.device("cpu")
 
-        # 1. Attempt loading the main Transformer model
+        # 1. Attempt loading the main Transformer model (torch checkpoint or ONNX graph)
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(model_path)
-            self.model = AutoModelForSequenceClassification.from_pretrained(model_path)
-            self.model.to(self.device)
-            self.model.eval()
+            if self.backend == "onnx":
+                # Lazy import so the ONNX Runtime stack is only required when actually serving
+                # the quantized model, not for the default PyTorch deployment.
+                from optimum.onnxruntime import ORTModelForSequenceClassification
+                onnx_file = self._find_onnx_file(model_path)
+                self.model = ORTModelForSequenceClassification.from_pretrained(
+                    model_path, file_name=onnx_file
+                )
+                logger.info(f"Quantized ONNX model loaded from '{model_path}/{onnx_file}' (CPU/INT8)")
+            else:
+                self.model = AutoModelForSequenceClassification.from_pretrained(model_path)
+                self.model.to(self.device)
+                self.model.eval()
+                logger.info(f"Primary Transformer loaded on device: {self.device}")
             self.transformer_ready = True
-            logger.info(f"Primary Transformer loaded on device: {self.device}")
         except Exception as e:
-            logger.error(f"Failed to load Transformer model: {e}")
+            logger.error(f"Failed to load {self.backend} model: {e}")
             self.transformer_ready = False
 
-        # 2. Attempt loading the fallback model
-        try:
-            self.fallback_model = joblib.load(f"{model_path}/fallback_model.joblib")
-            self.fallback_ready = True
-        except Exception as e:
-            logger.error(f"Failed to load fallback model: {e}")
+        # 2. Attempt loading the fallback model. The quantized artifact ships without a
+        # baseline joblib, so the fallback is only wired up for the native torch backend.
+        if self.backend == "onnx":
             self.fallback_ready = False
+        else:
+            try:
+                self.fallback_model = joblib.load(f"{model_path}/fallback_model.joblib")
+                self.fallback_ready = True
+            except Exception as e:
+                logger.error(f"Failed to load fallback model: {e}")
+                self.fallback_ready = False
+
+    @staticmethod
+    def _find_onnx_file(model_path: str) -> str:
+        """Locate the ONNX graph inside a model directory.
+
+        ORTQuantizer writes the optimized graph as `model_quantized.onnx`; prefer that
+        quantized file when present, otherwise fall back to the first `.onnx` found.
+        """
+        candidates = [f for f in os.listdir(model_path) if f.endswith(".onnx")]
+        if not candidates:
+            raise FileNotFoundError(f"No .onnx file found in '{model_path}'")
+        for f in candidates:
+            if "quant" in f.lower():
+                return f
+        return candidates[0]
 
 
     def _translate_to_dutch(self, text: str, source_lang: str) -> str:
