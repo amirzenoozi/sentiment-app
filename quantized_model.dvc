@@ -1,0 +1,6 @@
+outs:
+- md5: cc32c8b1a1001030be39375e77dd06e6.dir
+  size: 121623491
+  nfiles: 8
+  hash: md5
+  path: quantized_model

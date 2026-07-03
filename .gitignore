@@ -62,3 +62,4 @@ logs/
 # Environment files
 .env.local
 .env.*
+/quantized_model
