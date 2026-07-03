@@ -37,6 +37,7 @@ def _run_prediction(engine, review: str):
     latency = time.time() - start_time
     return {
         "label": details["label"],
+        "score": details["score"],
         "is_translated": details["is_translated"],
         "detected_language": details["detected_language"],
         "latency_seconds": round(latency, 4),

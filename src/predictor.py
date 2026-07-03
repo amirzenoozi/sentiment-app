@@ -140,11 +140,22 @@ class SentimentPredictor:
             )
 
 
-    def _predict_fallback(self, text: str) -> str:
+    def _predict_fallback(self, text: str):
+        """Return (label, score) from the baseline model.
+
+        `score` is the predicted class probability from `predict_proba`, or None if
+        the baseline is unavailable or exposes no probabilities.
+        """
         if not self.fallback_ready:
-            return "Average"
+            return "Average", None
         prediction_id = self.fallback_model.predict([text])[0]
-        return self.labels[prediction_id]
+        score = None
+        try:
+            proba = self.fallback_model.predict_proba([text])[0]
+            score = float(max(proba))
+        except Exception:
+            score = None
+        return self.labels[prediction_id], score
 
     def predict(self, text: str) -> str:
         """Return only the predicted sentiment label."""
@@ -155,11 +166,12 @@ class SentimentPredictor:
 
         Returns a dict with:
           - label: the predicted sentiment
+          - score: confidence for the predicted class (softmax/predict_proba), or None
           - detected_language: the language langdetect saw (None for empty input)
           - is_translated: True if the input was translated to Dutch before inference
         """
         if not text.strip():
-            return {"label": "Average", "detected_language": None, "is_translated": False}
+            return {"label": "Average", "score": None, "detected_language": None, "is_translated": False}
 
         # Step 1: Detect incoming text language wrapper at the edge
         try:
@@ -177,17 +189,25 @@ class SentimentPredictor:
             text, is_translated = self._translate_to_dutch(text, detected_lang)
 
         # Step 4: Core inference execution block with automated recovery triggers
+        score = None
         if not self.transformer_ready:
-            label = self._predict_fallback(text)
+            label, score = self._predict_fallback(text)
         else:
             try:
                 inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=512, padding=True).to(self.device)
                 with torch.no_grad():
                     outputs = self.model(**inputs)
-                    predicted_class_id = torch.argmax(outputs.logits, dim=1).item()
+                    probs = torch.softmax(outputs.logits, dim=1)
+                    predicted_class_id = int(torch.argmax(outputs.logits, dim=1).item())
+                    score = float(probs[0, predicted_class_id].item())
                 label = self.labels[predicted_class_id]
             except Exception as runtime_error:
                 logger.warning(f"Primary Transformer runtime failure: {runtime_error}. Switching to fallback model.")
-                label = self._predict_fallback(text)
+                label, score = self._predict_fallback(text)
 
-        return {"label": label, "detected_language": detected_lang, "is_translated": is_translated}
+        return {
+            "label": label,
+            "score": round(score, 4) if score is not None else None,
+            "detected_language": detected_lang,
+            "is_translated": is_translated,
+        }
