@@ -3,7 +3,17 @@ from pydantic import BaseModel
 import time
 from src.predictor import SentimentPredictor, InvalidLanguageError
 
-app = FastAPI(title="Dutch Movie Review Sentiment Classifier API")
+# Swagger groups operations by tag; ordering here controls the section order in /docs.
+tags_metadata = [
+    {"name": "v1", "description": "Primary full-precision PyTorch (RobBERT) model."},
+    {"name": "v2", "description": "INT8-quantized ONNX model (CPU-optimized) and side-by-side comparison."},
+    {"name": "ops", "description": "Liveness and readiness probes for monitoring and load balancers."},
+]
+
+app = FastAPI(
+    title="Dutch Movie Review Sentiment Classifier API",
+    openapi_tags=tags_metadata,
+)
 
 try:
     predictor = SentimentPredictor(model_path="./best_model")
@@ -11,8 +21,6 @@ except Exception:
     predictor = SentimentPredictor(model_path="pdelobelle/robbert-v2-dutch-base")
 
 # Optional INT8-quantized ONNX engine, served side-by-side for latency/quality comparison.
-# It is loaded only if the ./quantized_model volume is present; otherwise the dedicated
-# endpoints return 503 while the primary /classify route keeps serving normally.
 try:
     quantized_predictor = SentimentPredictor(model_path="./quantized_model", backend="onnx")
     if not quantized_predictor.transformer_ready:
@@ -83,7 +91,7 @@ def ready():
     return payload
 
 
-@app.post("/classify", status_code=status.HTTP_200_OK)
+@app.post("/v1/classify", status_code=status.HTTP_200_OK, tags=["v1"])
 def classify_review(input_data: ReviewInput):
     """Classify a review with the primary (full-precision PyTorch) engine."""
     try:
@@ -103,7 +111,7 @@ def classify_review(input_data: ReviewInput):
         )
 
 
-@app.post("/classify/quantized", status_code=status.HTTP_200_OK)
+@app.post("/v2/classify", status_code=status.HTTP_200_OK, tags=["v2"])
 def classify_review_quantized(input_data: ReviewInput):
     """Classify a review with the INT8-quantized ONNX engine (CPU-optimized)."""
     if quantized_predictor is None:
@@ -127,7 +135,7 @@ def classify_review_quantized(input_data: ReviewInput):
         )
 
 
-@app.post("/compare", status_code=status.HTTP_200_OK)
+@app.post("/v2/compare", status_code=status.HTTP_200_OK, tags=["v2"])
 def compare_models(input_data: ReviewInput):
     """Run both engines on the same input and return their labels and latencies side-by-side."""
     if quantized_predictor is None:
