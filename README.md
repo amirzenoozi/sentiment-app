@@ -87,7 +87,7 @@ Convert a trained model into an INT8 ONNX build (~4× smaller, faster CPU infere
 poetry run python quantize_cli.py ./best_model ./quantized_model --arch avx2
 ```
 
-Output goes to `quantized_model/` (`model_quantized.onnx` + tokenizer). The API serves it via `/classify/quantized`.
+Output goes to `quantized_model/` (`model_quantized.onnx` + tokenizer). The API serves it via `/v2/classify`.
 
 ---
 
@@ -101,21 +101,28 @@ Swagger UI: `http://localhost:8000/docs`
 
 ### Endpoints
 
-| Method | Path                  | Description                                            |
-|--------|-----------------------|--------------------------------------------------------|
-| POST   | `/classify`           | Classify with the primary (PyTorch) model              |
-| POST   | `/classify/quantized` | Classify with the INT8 ONNX model (503 if not loaded)  |
-| POST   | `/compare`            | Run both models, return labels, latencies, and speedup |
-| GET    | `/health`             | Liveness probe                                         |
-| GET    | `/ready`              | Readiness probe (reports which engines are loaded)     |
+Classification routes are **versioned by the model that serves them**: `/v1` is the
+full-precision PyTorch model, `/v2` is the INT8 ONNX (quantized) model. This lets both
+models run side-by-side under stable URLs, so a client can pin to `/v1` or migrate to the
+faster `/v2` without either path changing meaning. The ops probes (`/health`, `/ready`)
+are unversioned — they describe the process, not a model.
+
+| Method | Path             | Description                                            |
+|--------|------------------|--------------------------------------------------------|
+| POST   | `/v1/classify`   | Classify with the primary (PyTorch) model              |
+| POST   | `/v2/classify`   | Classify with the INT8 ONNX model (503 if not loaded)  |
+| POST   | `/v2/compare`    | Run both models, return labels, latencies, and speedup |
+| GET    | `/health`        | Liveness probe                                         |
+| GET    | `/ready`         | Readiness probe (reports which engines are loaded)     |
 
 **Example**
 
 ```bash
-curl -X POST http://localhost:8000/classify \
+curl -X POST http://localhost:8000/v1/classify \
   -H 'Content-Type: application/json' \
   -d '{"review": "Dit is een absolute topfilm! Geweldig acteerwerk."}'
-# -> {"label": "Positive", "latency_seconds": 0.045}
+# -> {"label": "Positive", "score": 0.98, "is_translated": false,
+#     "detected_language": "nl", "latency_seconds": 0.045}
 ```
 
 Unsupported non-Dutch input returns HTTP 400.
