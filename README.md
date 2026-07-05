@@ -13,15 +13,15 @@ Data and model artifacts are versioned with **DVC** (stored on an SSH remote); t
 
 ## My Assumptions
 
-- The primary model is fine-tuned on Dutch movie reviews using RobBERT.
+- The primary model is fine-tuned on Dutch movie reviews using [RobBERT](https://huggingface.co/pdelobelle/robbert-v2-dutch-base).
 - The fallback model is a TF-IDF + Logistic Regression baseline in case the RobBERT model fails to load or errors at runtime.
 - Input is a single review per request; batching is out of scope. Non-Dutch text is only supported for the languages the translator handles (e.g. en/de/it) — anything else returns HTTP 400.
   - No need to handle a multi-language in batch review.
   - Keep the latency low for single-review classification.
 - We might have some reviews from other languages, especially in the production environment when the system intract with real users. 
   - English is added because it's one of the most popular languages.
-  - German is added because it's really close Dutch.
-  - Italian is added because it's of my testing to see how system will be act when we have completly different language.
+  - German is added because it's really close to Dutch.
+  - Italian is added because it's for my tests to see how system will be act when we have completely different language.
 - Model artifacts (`best_model`, `quantized_model`) are provided at runtime via mounted volumes / DVC, not baked into the image. Readiness reflects the core classification path, not the translation service.
 - The dataset is heavily imbalanced (Negative ~6%), handled at training time with class-weighted + contrastive loss rather than resampling. The quantized ONNX model targets x86 CPU servers (avx2 profile).
 
@@ -34,15 +34,15 @@ Data and model artifacts are versioned with **DVC** (stored on an SSH remote); t
 
 
 ## Need an Investigation for Future
-Since the accuracy of the main RobBERT model for [Dutch Book Reviews Dataset](https://github.com/benjaminvdb/DBRD) is 95.1 percent, I think it is a good idea to use the Binary Classification instead of the Multi-Class Classification.
+Since the accuracy of the main RobBERT model for [Dutch Book Reviews Dataset](https://github.com/benjaminvdb/DBRD) is **95.1 percent**, I think it is a good idea to use the Binary Classification instead of the Multi-Class Classification.
 Then we can handle the `Average` class using a software solution by setting a threshold value on the prediction confidence score, for example everthing under 0.55 will be considered as `Average`.
 In that case, theoritacoly we can boost the accuracy of the model much faster than the data Augmentation or data Resampling.
 
 
 ## Limitation
-- I've already use a `augment_cli.py` script to generate augmented data for training, but It takes a long time to run on my local machine.
-- I have a MacOS M1 chip, and training the model using this chip is take a long time.
+- I have a MacOS with M2 chip, and training the model using this chip is take a long time.
 - My Server is Linux but it also has some selfhosted applications running, means it can affect the latency of the model in the prediction.
+- I  tried to create a better version of the dataset using `augment_cli.py` but it due to a hardware limitations, it takes a lot to run and generate the new verison of the dataset. 
 
 ---
 
@@ -209,10 +209,10 @@ total). Latency percentiles:
 - **p99**: 99% finished within this; only the worst 1% took longer (the "tail").
 
 ```bash
-poetry run python stress_test.py --host https://YOUR_HOST --endpoint /classify -n 2000 -c 50
+poetry run python stress_test.py --host https://app365.amirdouzandeh.me --endpoint /classify -n 2000 -c 50
 ```
 
-**Primary model** (`/classify`, full-precision PyTorch):
+**Primary model** (`/v1/classify`, full-precision PyTorch):
 
 | Concurrency | Requests | Throughput (req/s) | p50 (ms) | p95 (ms) | p99 (ms) | Success |
 |------------:|---------:|-------------------:|---------:|---------:|---------:|:-------:|
@@ -222,7 +222,7 @@ poetry run python stress_test.py --host https://YOUR_HOST --endpoint /classify -
 | 25          | 1500     | 10.3               | 2396     | 2787     | 3000     | 100%    |
 | 50          | 2000     | 10.0               | 4917     | 5790     | 6400     | 100%    |
 
-**Quantized model** (`/classify/quantized`, INT8 ONNX):
+**Quantized model** (`/v2/classify`, INT8 ONNX):
 
 | Concurrency | Requests | Throughput (req/s) | p50 (ms) | p95 (ms) | p99 (ms) | Success |
 |------------:|---------:|-------------------:|---------:|---------:|---------:|:-------:|
