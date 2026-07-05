@@ -25,9 +25,8 @@ accelerate = "^1.14.0"
 optimum = { version = "^1.23", extras = ["onnxruntime"] }
 
 [tool.poetry.group.dev.dependencies]
-# Dev-only data tooling for augment_cli.py (back-translation augmentation).
-# Not needed by the API at runtime, so excluded from the Docker image.
-sentencepiece = "^0.2.0"  # required by MarianMT tokenizers
+dvc = { version = "^3.67", extras = ["ssh"] }  # data/model versioning over SSH (pulls dvc-ssh)
+sentencepiece = "^0.2.0"  # required by MarianMT tokenizers (augment_cli.py)
 halo = "^0.0.31"          # CLI status spinners
 
 [[tool.poetry.source]]
