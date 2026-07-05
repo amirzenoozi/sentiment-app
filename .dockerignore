@@ -1,7 +1,11 @@
 best_model/
 .venv/
 .pytest_cache/
+test/
 .git/
 __pycache__/
 *.joblib
 *.safetensors
+augment_cli.py
+evaluate.py
+quantize_cli.py
