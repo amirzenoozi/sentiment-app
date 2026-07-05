@@ -194,3 +194,48 @@ To update a served model, refresh the mounted directory (e.g. `dvc pull` then co
 ```bash
 poetry run python -m unittest tests/test_predictor.py
 ```
+
+---
+
+## Load & Performance
+
+Measured with `stress_test.py` against the deployed service (Dutch-only payloads, single
+shared CPU server). Each row raises the number of concurrent clients and the request count
+(up to 2,000). **Concurrency** = how many requests are in flight simultaneously (not the
+total). Latency percentiles:
+
+- **p50** (median): half the requests were at least this fast — the "typical" experience.
+- **p95**: 95% finished within this; only the slowest 5% were worse.
+- **p99**: 99% finished within this; only the worst 1% took longer (the "tail").
+
+```bash
+poetry run python stress_test.py --host https://YOUR_HOST --endpoint /classify -n 2000 -c 50
+```
+
+**Primary model** (`/classify`, full-precision PyTorch):
+
+| Concurrency | Requests | Throughput (req/s) | p50 (ms) | p95 (ms) | p99 (ms) | Success |
+|------------:|---------:|-------------------:|---------:|---------:|---------:|:-------:|
+| 1           | 200      | 6.4                | 155      | 184      | 207      | 100%    |
+| 5           | 500      | 10.2               | 481      | 604      | 697      | 100%    |
+| 10          | 1000     | 10.9               | 915      | 1073     | 1134     | 100%    |
+| 25          | 1500     | 10.3               | 2396     | 2787     | 3000     | 100%    |
+| 50          | 2000     | 10.0               | 4917     | 5790     | 6400     | 100%    |
+
+**Quantized model** (`/classify/quantized`, INT8 ONNX):
+
+| Concurrency | Requests | Throughput (req/s) | p50 (ms) | p95 (ms) | p99 (ms) | Success |
+|------------:|---------:|-------------------:|---------:|---------:|---------:|:-------:|
+| 1           | 200      | 12.4               | 80       | 94       | 99       | 100%    |
+| 5           | 500      | 28.1               | 175      | 233      | 273      | 100%    |
+| 10          | 1000     | 30.4               | 326      | 441      | 511      | 100%    |
+| 25          | 1500     | 31.0               | 798      | 999      | 1101     | 100%    |
+| 50          | 2000     | 31.9               | 1545     | 1776     | 1891     | 100%    |
+
+**Takeaway:** each model's throughput saturates at a CPU-bound ceiling — ~10 req/s for the
+primary model, ~31 req/s for the quantized one (~3× higher, at roughly half the single-request
+latency). Beyond that ceiling extra load only queues, so latency grows linearly with
+concurrency (`latency ≈ concurrency ÷ throughput`) while throughput stays flat. No requests
+fail even at 50 concurrent / 2,000 requests — the service degrades by slowing down, not
+dropping. To scale further, run multiple API workers/replicas rather than tuning a single
+instance.
