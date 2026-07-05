@@ -29,6 +29,12 @@ accelerate = "^1.14.0"
 # serves it via the /classify/quantized endpoint.
 optimum = { version = "^1.23", extras = ["onnxruntime"] }
 
+[tool.poetry.group.dev.dependencies]
+# Dev-only data tooling for augment_cli.py (back-translation augmentation).
+# Not needed by the API at runtime, so excluded from the Docker image.
+sentencepiece = "^0.2.0"  # required by MarianMT tokenizers
+halo = "^0.0.31"          # CLI status spinners
+
 [[tool.poetry.source]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
