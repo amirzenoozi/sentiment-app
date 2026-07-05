@@ -20,7 +20,7 @@ WORKDIR /app
 COPY pyproject.toml poetry.lock* ./
 
 RUN poetry config cache-dir /tmp/poetry_cache \
-    && poetry install --no-root --without dev \
+    && poetry install --no-root --no-dev \
     && rm -rf /tmp/poetry_cache ~/.cache/pip
 
 COPY . .
