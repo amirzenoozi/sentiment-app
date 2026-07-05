@@ -4,6 +4,9 @@ version = "0.1.0"
 description = "Dutch Movie Review Sentiment Classifier"
 authors = ["Amir Douzandeh <amirzenoozi72@gmail.com>"]
 readme = "README.md"
+# This is an application (code in src/, app.py, CLIs), not a distributable library,
+# so Poetry manages dependencies only and does not try to install the project itself.
+package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.12"
