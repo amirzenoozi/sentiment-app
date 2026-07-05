@@ -9,3 +9,4 @@ __pycache__/
 augment_cli.py
 evaluate.py
 quantize_cli.py
+stress_test.py
