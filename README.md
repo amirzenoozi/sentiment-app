@@ -31,6 +31,9 @@ Data and model artifacts are versioned with **DVC** (stored on an SSH remote); t
 - Support batch classification to improve throughput for bulk workloads. This would complement the current single-review latency focus.
 - Reduce class imbalance via filtered back-translation augmentation (see `augment_cli.py`), A/B-tested in MLflow.
 - Add production monitoring for input drift and per-class accuracy, plus a readiness check and retries for the translation service. This closes the loop between deployment and model quality.
+- In the real-world scenario, we might need to handle the load according to the number of user that we might have, in that case, it's better to put a Queue manager like Redis or RabbitMQ to handle to load over the API.
+- Add a Caching system can be a good idea for the future and after checking the traffic of the service, for instance if we have repetitive requests for the same review, it can be a good idea to cache the results.
+- 
 
 
 ## Need an Investigation for Future
